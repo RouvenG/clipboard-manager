@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Foundation
 import Testing
 @testable import ClipShelf
@@ -245,5 +246,143 @@ struct ScriptRunnerTests {
         await #expect(throws: TransformError.self) {
             try await ScriptRunner.run(script: script, input: "x", sourceApp: nil, runtimePath: runtime.path)
         }
+    }
+}
+
+struct DragAndDropTests {
+    private func setUp() -> (HistoryStore, ShelfViewModel, ClipItem, Pinboard, Pinboard) {
+        let store = HistoryStore(inMemory: true)
+        let item = store.record(ClipSnapshot(kind: .text, text: "drag me"), sourceBundleID: nil, sourceAppName: nil)
+        let work = store.createPinboard(named: "Work")
+        let snippets = store.createPinboard(named: "Snippets")
+        let model = ShelfViewModel(store: store)
+        model.reload()
+        return (store, model, item, work, snippets)
+    }
+
+    @Test func storeMoveBetweenBoards() {
+        let (store, _, item, work, snippets) = setUp()
+        store.toggle(item, in: work)
+        #expect(store.move(item, from: work, to: snippets) == .moved)
+        #expect(work.items.isEmpty)
+        #expect(snippets.items.map(\.id) == [item.id])
+        #expect(store.move(item, from: snippets, to: snippets) == .unchanged)
+    }
+
+    @Test func storeMoveKeepsSourceWhenCopying() {
+        let (store, _, item, work, snippets) = setUp()
+        store.toggle(item, in: work)
+        #expect(store.move(item, from: work, to: snippets, keepInSource: true) == .added)
+        #expect(work.items.count == 1)
+        #expect(snippets.items.count == 1)
+    }
+
+    @Test func storeMoveIntoBoardThatAlreadyHasItem() {
+        let (store, _, item, work, snippets) = setUp()
+        store.toggle(item, in: work)
+        store.toggle(item, in: snippets)
+        #expect(store.move(item, from: work, to: snippets) == .moved)
+        #expect(work.items.isEmpty)
+        #expect(snippets.items.count == 1)
+    }
+
+    @Test func dropFromHistoryAddsToBoard() {
+        let (_, model, item, work, _) = setUp()
+        model.draggedItemID = item.id
+        #expect(model.dropDraggedItem(on: .pinboard(work.id), copy: false))
+        #expect(work.items.map(\.id) == [item.id])
+        #expect(model.status == "Added to Work")
+        #expect(model.draggedItemID == nil)
+        #expect(model.allItems.count == 1)
+    }
+
+    @Test func dropBetweenBoardsMoves() {
+        let (store, model, item, work, snippets) = setUp()
+        store.toggle(item, in: work)
+        model.reload()
+        model.tab = .pinboard(work.id)
+        model.draggedItemID = item.id
+        #expect(model.dropDraggedItem(on: .pinboard(snippets.id), copy: false))
+        #expect(work.items.isEmpty)
+        #expect(snippets.items.count == 1)
+        #expect(model.status == "Moved to Snippets")
+        #expect(model.visibleItems.isEmpty)
+    }
+
+    @Test func dropOnHistoryUnpins() {
+        let (store, model, item, work, _) = setUp()
+        store.toggle(item, in: work)
+        model.reload()
+        model.tab = .pinboard(work.id)
+        model.draggedItemID = item.id
+        #expect(model.dropDraggedItem(on: .history, copy: false))
+        #expect(work.items.isEmpty)
+        #expect(model.status == "Removed from Work")
+        #expect(store.items().count == 1)
+    }
+
+    @Test func dropWithoutDragDoesNothing() {
+        let (_, model, _, work, _) = setUp()
+        #expect(!model.dropDraggedItem(on: .pinboard(work.id), copy: false))
+        #expect(work.items.isEmpty)
+    }
+}
+
+struct ShortcutTests {
+    @Test func defaultIsOptionCommandV() {
+        #expect(Shortcut.shelfDefault.displayString == "⌥⌘V")
+        #expect(Shortcut.shelfDefault.modifierFlags == [.option, .command])
+    }
+
+    @Test func convertsEventFlagsToCarbonModifiers() {
+        let shortcut = Shortcut(keyCode: UInt16(kVK_Space), flags: [.control, .shift, .capsLock])
+        #expect(shortcut.modifiers == controlKey | shiftKey)
+        #expect(shortcut.displayString == "⌃⇧Space")
+        #expect(shortcut.menuKeyEquivalent == " ")
+    }
+
+    @Test func requiresARealModifierUnlessFunctionKey() {
+        #expect(!Shortcut(keyCode: kVK_ANSI_V, modifiers: 0).isValid)
+        #expect(!Shortcut(keyCode: kVK_ANSI_V, modifiers: shiftKey).isValid)
+        #expect(Shortcut(keyCode: kVK_ANSI_V, modifiers: controlKey).isValid)
+        #expect(Shortcut(keyCode: kVK_F5, modifiers: 0).isValid)
+        #expect(Shortcut(keyCode: kVK_F5, modifiers: 0).displayString == "F5")
+    }
+
+    @Test func persistsInPreferences() throws {
+        let suite = "clipshelf.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(Preferences(defaults: defaults).shelfShortcut == .shelfDefault)
+        let custom = Shortcut(keyCode: kVK_ANSI_C, modifiers: controlKey | optionKey)
+        Preferences(defaults: defaults).shelfShortcut = custom
+        #expect(Preferences(defaults: defaults).shelfShortcut == custom)
+    }
+
+    @Test func ignoresInvalidStoredShortcut() throws {
+        let suite = "clipshelf.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(try JSONEncoder().encode(Shortcut(keyCode: kVK_ANSI_A, modifiers: 0)), forKey: "shelfShortcut")
+        #expect(Preferences(defaults: defaults).shelfShortcut == .shelfDefault)
+    }
+
+    @Test func hotKeyReRegistersAndReportsConflicts() {
+        // Obscure combo so the test never collides with a running ClipShelf.
+        let first = Shortcut(keyCode: kVK_F19, modifiers: controlKey | optionKey | shiftKey | cmdKey)
+        let second = Shortcut(keyCode: kVK_F18, modifiers: controlKey | optionKey | shiftKey | cmdKey)
+        let hotKey = HotKey {}
+        let other = HotKey {}
+        defer { hotKey.unregister(); other.unregister() }
+
+        #expect(hotKey.register(first))
+        #expect(hotKey.shortcut == first)
+        #expect(!other.register(first))
+        #expect(other.shortcut == nil)
+
+        #expect(hotKey.register(second))
+        #expect(other.register(first))
     }
 }

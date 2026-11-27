@@ -33,6 +33,11 @@ final class Preferences {
         didSet { defaults.set(scriptRuntimePath, forKey: Keys.scriptRuntimePath) }
     }
 
+    /// Global shortcut that opens the shelf.
+    var shelfShortcut: Shortcut {
+        didSet { defaults.set(try? JSONEncoder().encode(shelfShortcut), forKey: Keys.shelfShortcut) }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -47,6 +52,9 @@ final class Preferences {
         excludedBundleIDs = defaults.stringArray(forKey: Keys.excludedBundleIDs) ?? Self.defaultExcludedBundleIDs
         isCapturePaused = defaults.bool(forKey: Keys.isCapturePaused)
         scriptRuntimePath = defaults.string(forKey: Keys.scriptRuntimePath) ?? ""
+        shelfShortcut = defaults.data(forKey: Keys.shelfShortcut)
+            .flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) }
+            .flatMap { $0.isValid ? $0 : nil } ?? .shelfDefault
     }
 
     private enum Keys {
@@ -54,13 +62,20 @@ final class Preferences {
         static let excludedBundleIDs = "excludedBundleIDs"
         static let isCapturePaused = "isCapturePaused"
         static let scriptRuntimePath = "scriptRuntimePath"
+        static let shelfShortcut = "shelfShortcut"
     }
 }
 
 enum AppPaths {
+    /// Launch with `--args -ClipShelfSupportDirectory <path>` to keep test runs away from real history.
     static var supportDirectory: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent("ClipShelf", isDirectory: true)
+        let dir: URL
+        if let override = UserDefaults.standard.string(forKey: "ClipShelfSupportDirectory"), !override.isEmpty {
+            dir = URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
+        } else {
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            dir = base.appendingPathComponent("ClipShelf", isDirectory: true)
+        }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

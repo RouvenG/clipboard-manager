@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var store: HistoryStore!
     private var monitor: ClipboardMonitor!
     private var shelf: ShelfController!
-    private var hotKey: HotKey?
+    private var hotKey: HotKey!
     private var statusItem: NSStatusItem!
     private var settingsWindow: NSWindow?
     private var pruneTimer: Timer?
@@ -46,6 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ScriptRunner.seedExampleIfNeeded()
         monitor.start()
         hotKey = HotKey { [weak self] in self?.shelf.toggle() }
+        if !hotKey.register(preferences.shelfShortcut) {
+            hotKey.register(.shelfDefault)
+        }
         setUpStatusItem()
         #if DEBUG
         debugHooks = DebugHooks(shelf: shelf)
@@ -78,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 backing: .buffered, defer: false)
             window.title = "ClipShelf Settings"
             window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: SettingsView(store: store, preferences: preferences))
+            window.contentView = NSHostingView(rootView: SettingsView(store: store, hotKey: hotKey, preferences: preferences))
             window.center()
             settingsWindow = window
         }
@@ -102,8 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        let open = NSMenuItem(title: "Open Shelf", action: #selector(openShelf), keyEquivalent: "v")
-        open.keyEquivalentModifierMask = [.command, .option]
+        let shortcut = hotKey.shortcut ?? preferences.shelfShortcut
+        let open = NSMenuItem(title: "Open Shelf", action: #selector(openShelf), keyEquivalent: shortcut.menuKeyEquivalent)
+        open.keyEquivalentModifierMask = shortcut.modifierFlags
         menu.addItem(open)
         menu.addItem(.separator())
         let pause = NSMenuItem(title: preferences.isCapturePaused ? "Resume Capturing" : "Pause Capturing",

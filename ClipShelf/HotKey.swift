@@ -4,15 +4,14 @@ import Carbon.HIToolbox
 final class HotKey {
     private var hotKeyRef: EventHotKeyRef?
     private var handlerRef: EventHandlerRef?
-    private let action: () -> Void
 
     private static var actions: [UInt32: () -> Void] = [:]
     private static var nextID: UInt32 = 1
     private let id: UInt32
 
-    /// Defaults to Option+Cmd+V.
-    init(keyCode: Int = kVK_ANSI_V, modifiers: Int = cmdKey | optionKey, action: @escaping () -> Void) {
-        self.action = action
+    private(set) var shortcut: Shortcut?
+
+    init(action: @escaping () -> Void) {
         self.id = HotKey.nextID
         HotKey.nextID += 1
         HotKey.actions[id] = action
@@ -28,12 +27,29 @@ final class HotKey {
             }
             return noErr
         }, 1, &eventType, nil, &handlerRef)
+    }
 
+    /// Replaces the current registration. Returns false (and registers nothing) when macOS refuses it, e.g. when
+    /// this app already holds it. Clashes with other apps go unreported: whichever registered it may win.
+    @discardableResult
+    func register(_ shortcut: Shortcut) -> Bool {
+        unregister()
         let hotKeyID = EventHotKeyID(signature: OSType(0x434C_5348), id: id) // "CLSH"
-        let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
-        if status != noErr {
-            NSLog("ClipShelf: could not register hotkey (\(status)); another app may own it")
+        let status = RegisterEventHotKey(UInt32(shortcut.keyCode), UInt32(shortcut.modifiers), hotKeyID,
+                                         GetApplicationEventTarget(), 0, &hotKeyRef)
+        guard status == noErr else {
+            NSLog("ClipShelf: could not register \(shortcut.displayString) (\(status))")
+            hotKeyRef = nil
+            return false
         }
+        self.shortcut = shortcut
+        return true
+    }
+
+    func unregister() {
+        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
+        hotKeyRef = nil
+        shortcut = nil
     }
 
     deinit {

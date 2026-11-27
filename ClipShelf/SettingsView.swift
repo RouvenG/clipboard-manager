@@ -1,14 +1,16 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
     let store: HistoryStore
+    let hotKey: HotKey
     @Bindable var preferences: Preferences
 
     var body: some View {
         TabView {
-            GeneralSettings(preferences: preferences)
+            GeneralSettings(preferences: preferences, hotKey: hotKey)
                 .tabItem { Label("General", systemImage: "gearshape") }
             PrivacySettings(preferences: preferences)
                 .tabItem { Label("Privacy", systemImage: "hand.raised") }
@@ -24,6 +26,8 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @Bindable var preferences: Preferences
+    let hotKey: HotKey
+    @State private var shortcutError: String?
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var launchError: String?
     @State private var accessibilityGranted = AccessibilityPermission.isGranted
@@ -46,7 +50,18 @@ private struct GeneralSettings: View {
                         }
                     }
                 if let launchError { Text(launchError).foregroundStyle(.red).font(.caption) }
-                LabeledContent("Open shelf", value: "⌥⌘V")
+                LabeledContent("Open shelf") {
+                    HStack {
+                        ShortcutRecorder(
+                            shortcut: preferences.shelfShortcut,
+                            onBegin: { hotKey.unregister() },
+                            onEnd: apply)
+                        if preferences.shelfShortcut != .shelfDefault {
+                            Button("Reset") { apply(.shelfDefault) }
+                        }
+                    }
+                }
+                if let shortcutError { Text(shortcutError).foregroundStyle(.red).font(.caption) }
             }
             Section("History") {
                 Picker("Keep history for", selection: $preferences.retentionDays) {
@@ -78,6 +93,93 @@ private struct GeneralSettings: View {
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
             accessibilityGranted = AccessibilityPermission.isGranted
         }
+    }
+
+    /// Registers the recorded shortcut, or restores the previous one when it is nil (cancelled) or refused.
+    private func apply(_ shortcut: Shortcut?) {
+        let previous = preferences.shelfShortcut
+        guard let shortcut, shortcut != previous else {
+            hotKey.register(previous)
+            shortcutError = nil
+            return
+        }
+        if hotKey.register(shortcut) {
+            preferences.shelfShortcut = shortcut
+            shortcutError = nil
+        } else {
+            hotKey.register(previous)
+            shortcutError = "macOS refused \(shortcut.displayString). Kept \(previous.displayString)."
+        }
+    }
+}
+
+/// Click, then press the new shortcut. Esc cancels.
+private struct ShortcutRecorder: View {
+    let shortcut: Shortcut
+    let onBegin: () -> Void
+    let onEnd: (Shortcut?) -> Void
+
+    @State private var isRecording = false
+    @State private var heldModifiers: NSEvent.ModifierFlags = []
+    @State private var hint: String?
+    @State private var monitor: Any?
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Button(action: { isRecording ? finish(nil) : start() }) {
+                Text(label)
+                    .font(.system(.body, design: .rounded).weight(.medium))
+                    .frame(minWidth: 110)
+            }
+            .buttonStyle(.bordered)
+            .tint(isRecording ? .accentColor : nil)
+            .help(isRecording ? "Press the new shortcut, or Esc to cancel" : "Click to change")
+            if let hint { Text(hint).font(.caption).foregroundStyle(.orange) }
+        }
+        .onDisappear { if isRecording { finish(nil) } }
+    }
+
+    private var label: String {
+        guard isRecording else { return shortcut.displayString }
+        return heldModifiers.isEmpty ? "Type shortcut…" : Shortcut.modifierSymbols(heldModifiers) + "…"
+    }
+
+    private func start() {
+        isRecording = true
+        hint = nil
+        heldModifiers = []
+        onBegin()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+            handle(event)
+            return nil
+        }
+    }
+
+    private func handle(_ event: NSEvent) {
+        let flags = event.modifierFlags.intersection([.control, .option, .shift, .command])
+        if event.type == .flagsChanged {
+            heldModifiers = flags
+            return
+        }
+        if Int(event.keyCode) == kVK_Escape && flags.isEmpty {
+            finish(nil)
+            return
+        }
+        let candidate = Shortcut(keyCode: event.keyCode, flags: flags)
+        if candidate.isValid {
+            finish(candidate)
+        } else {
+            hint = "Add ⌘, ⌥ or ⌃"
+        }
+    }
+
+    private func finish(_ result: Shortcut?) {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        isRecording = false
+        heldModifiers = []
+        hint = nil
+        onEnd(result)
     }
 }
 

@@ -98,6 +98,7 @@ final class ShelfViewModel {
         tab = .history
         filter = .all
         query = ""
+        draggedItemID = nil
         menuQuery = ""
         status = nil
         selectedIndex = 0
@@ -229,6 +230,37 @@ final class ShelfViewModel {
         }
         mode = .browse
         reload()
+    }
+
+    // MARK: Drag and drop
+
+    /// The card being dragged inside the shelf. Set when a drag starts, cleared on drop or when the shelf hides.
+    var draggedItemID: UUID?
+
+    private func board(for tab: ShelfTab) -> Pinboard? {
+        guard case .pinboard(let id) = tab else { return nil }
+        return boards.first { $0.id == id }
+    }
+
+    /// Drops the dragged card on a tab: moves it out of the current pinboard into the target one.
+    /// History as target takes it off the current pinboard. `copy` (⌥ held) keeps it in the current pinboard.
+    @discardableResult
+    func dropDraggedItem(on target: ShelfTab, copy: Bool) -> Bool {
+        defer { draggedItemID = nil }
+        guard let id = draggedItemID, let item = allItems.first(where: { $0.id == id }) else { return false }
+        let source = board(for: tab)
+        let destination = board(for: target)
+        if case .pinboard = target, destination == nil { return false }
+
+        let result = store.move(item, from: source, to: destination, keepInSource: copy)
+        switch result {
+        case .moved: status = "Moved to \(title(of: target))"
+        case .added: status = "Added to \(title(of: target))"
+        case .removed: status = "Removed from \(source?.name ?? "pinboard")"
+        case .unchanged: status = destination.map { "Already in \($0.name)" } ?? "Already in History"
+        }
+        reload()
+        return result != .unchanged
     }
 
     // MARK: Keyboard

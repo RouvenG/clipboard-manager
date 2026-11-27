@@ -4,7 +4,7 @@ A local, keyboard-first clipboard manager for macOS, modeled on [Paste](https://
 
 - **Local only:** no network code, no sync. History lives in `~/Library/Application Support/ClipShelf`.
 - **Private by default:** skips anything apps mark as concealed or transient (passwords, one-time codes) and ignores copies from password managers. Add your own excluded apps in Settings.
-- **Keyboard-first:** open with ⌥⌘V, type to search, arrows to move, Return to paste.
+- **Keyboard-first:** open with ⌥⌘V (change it in Settings > General), type to search, arrows to move, Return to paste.
 - **Dev tooling:** detects code (monospace cards with a language badge) and transforms text with JSON, whitespace, case and encoding helpers or your own scripts.
 
 ## Requirements
@@ -48,7 +48,7 @@ Launch at login is a toggle in Settings > General (uses `SMAppService`; works be
 
 | Key | Action |
 | --- | --- |
-| ⌥⌘V | Open or close the shelf |
+| ⌥⌘V | Open or close the shelf. To change it, click the shortcut in Settings > General and press a new one (it needs ⌘, ⌥ or ⌃, or use a function key). macOS doesn't report clashes with other apps' shortcuts, so pick one nothing else uses. |
 | Typing | Search (text, source app, language) |
 | ← → | Move between cards |
 | Return | Paste the selected card |
@@ -56,6 +56,7 @@ Launch at login is a toggle in Settings > General (uses `SMAppService`; works be
 | ⌘1 to ⌘9 | Paste card 1 to 9 directly (add ⇧ for plain text) |
 | ⌘K | Transform the selected card, then paste the result |
 | ⌘P | Add to or remove from a pinboard (type a new name and Return to create one) |
+| Drag a card onto a tab | Move it to that pinboard (hold ⌥ to keep it in the current one too). Dropping on History takes it off its pinboard. Cards also drag out into other apps. |
 | Tab / ⇧Tab | Switch between History and pinboards |
 | ⌘0 ⌘T ⌘I ⌘L ⌘F ⌘E | Filter: all, text, images, links, files, code |
 | ⌘C | Copy the card without pasting |
@@ -86,6 +87,12 @@ Writing these with an AI assistant works well: describe the transform and paste 
 
 ```bash
 swift Scripts/debug-command.swift show "type:json" snapshot:/tmp/shelf.png state:/tmp/shelf.json
+```
+
+- Debug commands act on your real history. For test runs, quit your normal instance and start one with its own data folder:
+
+```bash
+open -n build/Build/Products/Debug/ClipShelf.app --args -ClipShelfSupportDirectory /tmp/clipshelf-test
 ```
 
 ## License

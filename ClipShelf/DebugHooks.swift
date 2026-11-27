@@ -30,7 +30,9 @@ final class DebugHooks {
         case "type": model.activeQuery += argument
         case "key": sendKey(argument)
         case "snapshot": snapshot(to: argument)
+        case "drop": drop(argument)
         case "state": writeState(to: argument)
+        case "settings": snapshotSettings(to: argument)
         default: NSLog("ClipShelf debug: unknown command \(command)")
         }
     }
@@ -51,10 +53,31 @@ final class DebugHooks {
         _ = shelf.model.handleKey(event)
     }
 
+    /// `drop:<visible card index>,<tab index>[,copy]` runs the same path as dragging a card onto a tab.
+    private func drop(_ spec: String) {
+        let tokens = spec.split(separator: ",").map(String.init)
+        let model = shelf.model
+        guard tokens.count >= 2, let itemIndex = Int(tokens[0]), let tabIndex = Int(tokens[1]),
+              model.visibleItems.indices.contains(itemIndex), model.tabs.indices.contains(tabIndex) else { return }
+        model.draggedItemID = model.visibleItems[itemIndex].id
+        model.dropDraggedItem(on: model.tabs[tabIndex], copy: tokens.contains("copy"))
+    }
+
     private func snapshot(to path: String) {
         guard let view = shelf.panel?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+
+    /// `settings:<png path>` opens Settings and snapshots it once SwiftUI has laid it out.
+    private func snapshotSettings(to path: String) {
+        shelf.onOpenSettings()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            guard let view = NSApp.windows.first(where: { $0.title == "ClipShelf Settings" })?.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        }
     }
 
     private func writeState(to path: String) {
@@ -73,6 +96,7 @@ final class DebugHooks {
             "pasteboard": NSPasteboard.general.string(forType: .string) ?? "",
             "accessibility": AccessibilityPermission.isGranted,
             "pasteboardAccess": PasteboardAccess.description,
+            "shelfShortcut": Preferences.shared.shelfShortcut.displayString,
         ]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path))

@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ShelfView: View {
     @Bindable var model: ShelfViewModel
@@ -29,8 +31,7 @@ struct ShelfView: View {
         HStack(spacing: 12) {
             HStack(spacing: 4) {
                 ForEach(model.tabs, id: \.self) { tab in
-                    Button(model.title(of: tab)) { model.tab = tab }
-                        .buttonStyle(TabButtonStyle(isSelected: model.tab == tab))
+                    TabDropTarget(model: model, tab: tab)
                 }
             }
 
@@ -68,6 +69,11 @@ struct ShelfView: View {
                             .id(item.id)
                             .onTapGesture(count: 2) { model.onPaste(item, false) }
                             .onTapGesture { model.selectedIndex = index }
+                            .onDrag {
+                                model.selectedIndex = index
+                                model.draggedItemID = item.id
+                                return DragProvider.provider(for: item)
+                            }
                             .contextMenu { contextMenu(for: item, index: index) }
                     }
                 }
@@ -118,6 +124,7 @@ struct ShelfView: View {
                 Text("⌘1-9 quick")
                 Text("⌘K transform")
                 Text("⌘P pin")
+                Text("drag to board, ⌥ copies")
                 Text("⇥ boards")
                 Text("⌘⌫ delete")
             }
@@ -127,15 +134,61 @@ struct ShelfView: View {
     }
 }
 
+/// A board tab that also accepts cards dragged from the shelf.
+private struct TabDropTarget: View {
+    let model: ShelfViewModel
+    let tab: ShelfTab
+    @State private var isTargeted = false
+
+    var body: some View {
+        Button(model.title(of: tab)) { model.tab = tab }
+            .buttonStyle(TabButtonStyle(isSelected: model.tab == tab, isDropTarget: isTargeted))
+            .onDrop(of: [.item], isTargeted: $isTargeted) { _ in
+                guard model.draggedItemID != nil else { return false }
+                let copy = NSEvent.modifierFlags.contains(.option)
+                return model.dropDraggedItem(on: tab, copy: copy)
+            }
+            .help(tab == .history ? "Drop a card here to take it off its pinboard"
+                                  : "Drop a card here to move it, hold ⌥ to keep it in the current board too")
+    }
+}
+
+enum DragProvider {
+    /// Gives other apps the clip's content, so cards can also be dragged out of the shelf.
+    static func provider(for item: ClipItem) -> NSItemProvider {
+        switch item.kind {
+        case .image:
+            if let data = item.imageData {
+                return NSItemProvider(item: data as NSData, typeIdentifier: UTType.png.identifier)
+            }
+        case .file:
+            if let url = item.fileURLs.first, let provider = NSItemProvider(contentsOf: url) {
+                return provider
+            }
+        case .link:
+            if let text = item.text, let url = URL(string: text) {
+                return NSItemProvider(object: url as NSURL)
+            }
+        case .text, .richText:
+            break
+        }
+        return NSItemProvider(object: (item.text ?? "") as NSString)
+    }
+}
+
 private struct TabButtonStyle: ButtonStyle {
     let isSelected: Bool
+    var isDropTarget = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.callout.weight(isSelected ? .semibold : .regular))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(isSelected ? AnyShapeStyle(.tint.opacity(0.25)) : AnyShapeStyle(.clear), in: Capsule())
+            .background(isSelected || isDropTarget ? AnyShapeStyle(.tint.opacity(isDropTarget ? 0.5 : 0.25)) : AnyShapeStyle(.clear), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.accentColor, lineWidth: isDropTarget ? 2 : 0))
+            .scaleEffect(isDropTarget ? 1.08 : 1)
+            .animation(.easeOut(duration: 0.1), value: isDropTarget)
             .foregroundStyle(isSelected ? .primary : .secondary)
             .opacity(configuration.isPressed ? 0.7 : 1)
             .contentShape(Capsule())
