@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Foundation
 import Testing
 @testable import ClipShelf
@@ -324,5 +325,64 @@ struct DragAndDropTests {
         let (_, model, _, work, _) = setUp()
         #expect(!model.dropDraggedItem(on: .pinboard(work.id), copy: false))
         #expect(work.items.isEmpty)
+    }
+}
+
+struct ShortcutTests {
+    @Test func defaultIsOptionCommandV() {
+        #expect(Shortcut.shelfDefault.displayString == "⌥⌘V")
+        #expect(Shortcut.shelfDefault.modifierFlags == [.option, .command])
+    }
+
+    @Test func convertsEventFlagsToCarbonModifiers() {
+        let shortcut = Shortcut(keyCode: UInt16(kVK_Space), flags: [.control, .shift, .capsLock])
+        #expect(shortcut.modifiers == controlKey | shiftKey)
+        #expect(shortcut.displayString == "⌃⇧Space")
+        #expect(shortcut.menuKeyEquivalent == " ")
+    }
+
+    @Test func requiresARealModifierUnlessFunctionKey() {
+        #expect(!Shortcut(keyCode: kVK_ANSI_V, modifiers: 0).isValid)
+        #expect(!Shortcut(keyCode: kVK_ANSI_V, modifiers: shiftKey).isValid)
+        #expect(Shortcut(keyCode: kVK_ANSI_V, modifiers: controlKey).isValid)
+        #expect(Shortcut(keyCode: kVK_F5, modifiers: 0).isValid)
+        #expect(Shortcut(keyCode: kVK_F5, modifiers: 0).displayString == "F5")
+    }
+
+    @Test func persistsInPreferences() throws {
+        let suite = "clipshelf.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(Preferences(defaults: defaults).shelfShortcut == .shelfDefault)
+        let custom = Shortcut(keyCode: kVK_ANSI_C, modifiers: controlKey | optionKey)
+        Preferences(defaults: defaults).shelfShortcut = custom
+        #expect(Preferences(defaults: defaults).shelfShortcut == custom)
+    }
+
+    @Test func ignoresInvalidStoredShortcut() throws {
+        let suite = "clipshelf.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(try JSONEncoder().encode(Shortcut(keyCode: kVK_ANSI_A, modifiers: 0)), forKey: "shelfShortcut")
+        #expect(Preferences(defaults: defaults).shelfShortcut == .shelfDefault)
+    }
+
+    @Test func hotKeyReRegistersAndReportsConflicts() {
+        // Obscure combo so the test never collides with a running ClipShelf.
+        let first = Shortcut(keyCode: kVK_F19, modifiers: controlKey | optionKey | shiftKey | cmdKey)
+        let second = Shortcut(keyCode: kVK_F18, modifiers: controlKey | optionKey | shiftKey | cmdKey)
+        let hotKey = HotKey {}
+        let other = HotKey {}
+        defer { hotKey.unregister(); other.unregister() }
+
+        #expect(hotKey.register(first))
+        #expect(hotKey.shortcut == first)
+        #expect(!other.register(first))
+        #expect(other.shortcut == nil)
+
+        #expect(hotKey.register(second))
+        #expect(other.register(first))
     }
 }

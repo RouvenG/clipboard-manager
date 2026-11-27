@@ -2,7 +2,7 @@
 // Sends a command to a running Debug build of ClipShelf.
 // Usage: swift Scripts/debug-command.swift show | hide | type:<text> | key:<keyCode>[,cmd][,shift][,char=x]
 //        | drop:<card index>,<tab index>[,copy]
-//        | snapshot:<png path> | state:<json path>
+//        | snapshot:<png path> | state:<json path> | settings:<png path>
 import Foundation
 
 guard CommandLine.arguments.count > 1 else {

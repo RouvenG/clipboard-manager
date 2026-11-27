@@ -4,7 +4,7 @@ A local, keyboard-first clipboard manager for macOS, modeled on [Paste](https://
 
 - **Local only:** no network code, no sync. History lives in `~/Library/Application Support/ClipShelf`.
 - **Private by default:** skips anything apps mark as concealed or transient (passwords, one-time codes) and ignores copies from password managers. Add your own excluded apps in Settings.
-- **Keyboard-first:** open with ⌥⌘V, type to search, arrows to move, Return to paste.
+- **Keyboard-first:** open with ⌥⌘V (change it in Settings > General), type to search, arrows to move, Return to paste.
 - **Dev tooling:** detects code (monospace cards with a language badge) and transforms text with JSON, whitespace, case and encoding helpers or your own scripts.
 
 ## Requirements
@@ -48,7 +48,7 @@ Launch at login is a toggle in Settings > General (uses `SMAppService`; works be
 
 | Key | Action |
 | --- | --- |
-| ⌥⌘V | Open or close the shelf |
+| ⌥⌘V | Open or close the shelf. To change it, click the shortcut in Settings > General and press a new one (it needs ⌘, ⌥ or ⌃, or use a function key). macOS doesn't report clashes with other apps' shortcuts, so pick one nothing else uses. |
 | Typing | Search (text, source app, language) |
 | ← → | Move between cards |
 | Return | Paste the selected card |

@@ -32,6 +32,7 @@ final class DebugHooks {
         case "snapshot": snapshot(to: argument)
         case "drop": drop(argument)
         case "state": writeState(to: argument)
+        case "settings": snapshotSettings(to: argument)
         default: NSLog("ClipShelf debug: unknown command \(command)")
         }
     }
@@ -68,6 +69,17 @@ final class DebugHooks {
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
 
+    /// `settings:<png path>` opens Settings and snapshots it once SwiftUI has laid it out.
+    private func snapshotSettings(to path: String) {
+        shelf.onOpenSettings()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            guard let view = NSApp.windows.first(where: { $0.title == "ClipShelf Settings" })?.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
     private func writeState(to path: String) {
         let model = shelf.model
         let state: [String: Any] = [
@@ -84,6 +96,7 @@ final class DebugHooks {
             "pasteboard": NSPasteboard.general.string(forType: .string) ?? "",
             "accessibility": AccessibilityPermission.isGranted,
             "pasteboardAccess": PasteboardAccess.description,
+            "shelfShortcut": Preferences.shared.shelfShortcut.displayString,
         ]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path))
