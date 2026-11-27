@@ -1,6 +1,7 @@
 #!/usr/bin/env swift
 // Sends a command to a running Debug build of ClipShelf.
 // Usage: swift Scripts/debug-command.swift show | hide | type:<text> | key:<keyCode>[,cmd][,shift][,char=x]
+//        | drop:<card index>,<tab index>[,copy]
 //        | snapshot:<png path> | state:<json path>
 import Foundation
 

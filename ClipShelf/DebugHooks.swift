@@ -30,6 +30,7 @@ final class DebugHooks {
         case "type": model.activeQuery += argument
         case "key": sendKey(argument)
         case "snapshot": snapshot(to: argument)
+        case "drop": drop(argument)
         case "state": writeState(to: argument)
         default: NSLog("ClipShelf debug: unknown command \(command)")
         }
@@ -49,6 +50,16 @@ final class DebugHooks {
             characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code
         ) else { return }
         _ = shelf.model.handleKey(event)
+    }
+
+    /// `drop:<visible card index>,<tab index>[,copy]` runs the same path as dragging a card onto a tab.
+    private func drop(_ spec: String) {
+        let tokens = spec.split(separator: ",").map(String.init)
+        let model = shelf.model
+        guard tokens.count >= 2, let itemIndex = Int(tokens[0]), let tabIndex = Int(tokens[1]),
+              model.visibleItems.indices.contains(itemIndex), model.tabs.indices.contains(tabIndex) else { return }
+        model.draggedItemID = model.visibleItems[itemIndex].id
+        model.dropDraggedItem(on: model.tabs[tabIndex], copy: tokens.contains("copy"))
     }
 
     private func snapshot(to path: String) {

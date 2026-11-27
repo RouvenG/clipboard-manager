@@ -247,3 +247,82 @@ struct ScriptRunnerTests {
         }
     }
 }
+
+struct DragAndDropTests {
+    private func setUp() -> (HistoryStore, ShelfViewModel, ClipItem, Pinboard, Pinboard) {
+        let store = HistoryStore(inMemory: true)
+        let item = store.record(ClipSnapshot(kind: .text, text: "drag me"), sourceBundleID: nil, sourceAppName: nil)
+        let work = store.createPinboard(named: "Work")
+        let snippets = store.createPinboard(named: "Snippets")
+        let model = ShelfViewModel(store: store)
+        model.reload()
+        return (store, model, item, work, snippets)
+    }
+
+    @Test func storeMoveBetweenBoards() {
+        let (store, _, item, work, snippets) = setUp()
+        store.toggle(item, in: work)
+        #expect(store.move(item, from: work, to: snippets) == .moved)
+        #expect(work.items.isEmpty)
+        #expect(snippets.items.map(\.id) == [item.id])
+        #expect(store.move(item, from: snippets, to: snippets) == .unchanged)
+    }
+
+    @Test func storeMoveKeepsSourceWhenCopying() {
+        let (store, _, item, work, snippets) = setUp()
+        store.toggle(item, in: work)
+        #expect(store.move(item, from: work, to: snippets, keepInSource: true) == .added)
+        #expect(work.items.count == 1)
+        #expect(snippets.items.count == 1)
+    }
+
+    @Test func storeMoveIntoBoardThatAlreadyHasItem() {
+        let (store, _, item, work, snippets) = setUp()
+        store.toggle(item, in: work)
+        store.toggle(item, in: snippets)
+        #expect(store.move(item, from: work, to: snippets) == .moved)
+        #expect(work.items.isEmpty)
+        #expect(snippets.items.count == 1)
+    }
+
+    @Test func dropFromHistoryAddsToBoard() {
+        let (_, model, item, work, _) = setUp()
+        model.draggedItemID = item.id
+        #expect(model.dropDraggedItem(on: .pinboard(work.id), copy: false))
+        #expect(work.items.map(\.id) == [item.id])
+        #expect(model.status == "Added to Work")
+        #expect(model.draggedItemID == nil)
+        #expect(model.allItems.count == 1)
+    }
+
+    @Test func dropBetweenBoardsMoves() {
+        let (store, model, item, work, snippets) = setUp()
+        store.toggle(item, in: work)
+        model.reload()
+        model.tab = .pinboard(work.id)
+        model.draggedItemID = item.id
+        #expect(model.dropDraggedItem(on: .pinboard(snippets.id), copy: false))
+        #expect(work.items.isEmpty)
+        #expect(snippets.items.count == 1)
+        #expect(model.status == "Moved to Snippets")
+        #expect(model.visibleItems.isEmpty)
+    }
+
+    @Test func dropOnHistoryUnpins() {
+        let (store, model, item, work, _) = setUp()
+        store.toggle(item, in: work)
+        model.reload()
+        model.tab = .pinboard(work.id)
+        model.draggedItemID = item.id
+        #expect(model.dropDraggedItem(on: .history, copy: false))
+        #expect(work.items.isEmpty)
+        #expect(model.status == "Removed from Work")
+        #expect(store.items().count == 1)
+    }
+
+    @Test func dropWithoutDragDoesNothing() {
+        let (_, model, _, work, _) = setUp()
+        #expect(!model.dropDraggedItem(on: .pinboard(work.id), copy: false))
+        #expect(work.items.isEmpty)
+    }
+}

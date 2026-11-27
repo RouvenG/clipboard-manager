@@ -58,9 +58,15 @@ final class Preferences {
 }
 
 enum AppPaths {
+    /// Launch with `--args -ClipShelfSupportDirectory <path>` to keep test runs away from real history.
     static var supportDirectory: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent("ClipShelf", isDirectory: true)
+        let dir: URL
+        if let override = UserDefaults.standard.string(forKey: "ClipShelfSupportDirectory"), !override.isEmpty {
+            dir = URL(fileURLWithPath: (override as NSString).expandingTildeInPath, isDirectory: true)
+        } else {
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            dir = base.appendingPathComponent("ClipShelf", isDirectory: true)
+        }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

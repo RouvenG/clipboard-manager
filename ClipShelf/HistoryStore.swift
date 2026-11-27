@@ -125,6 +125,32 @@ final class HistoryStore {
         save()
     }
 
+    enum MoveResult: Equatable {
+        case moved, added, removed, unchanged
+    }
+
+    /// Moves an item between boards. `nil` stands for History, which holds every item, so moving to it only
+    /// takes the item off `source`. With `keepInSource` the item is added to `target` and stays in `source`.
+    @discardableResult
+    func move(_ item: ClipItem, from source: Pinboard?, to target: Pinboard?, keepInSource: Bool = false) -> MoveResult {
+        if let source, let target, source.id == target.id { return .unchanged }
+
+        var added = false
+        if let target, !target.items.contains(where: { $0.id == item.id }) {
+            target.items.append(item)
+            added = true
+        }
+        var removed = false
+        if let source, !keepInSource, let index = source.items.firstIndex(where: { $0.id == item.id }) {
+            source.items.remove(at: index)
+            removed = true
+        }
+        guard added || removed else { return .unchanged }
+        save()
+        if removed { return target == nil ? .removed : .moved }
+        return .added
+    }
+
     private func save() {
         do {
             try context.save()
