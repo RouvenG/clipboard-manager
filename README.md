@@ -33,6 +33,16 @@ ClipShelf runs as a menu bar app (clipboard icon, no Dock icon). Run the tests w
 xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -derivedDataPath build test
 ```
 
+### Download a release
+
+[Releases](https://github.com/RouvenG/clipboard-manager/releases) have a DMG and a zip for Apple Silicon Macs. Open the DMG and drag ClipShelf into Applications.
+
+Release builds are ad hoc signed (no Apple Developer ID or notarization), so Gatekeeper blocks the first launch. Either right-click ClipShelf.app, choose Open and confirm, or clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/ClipShelf.app
+```
+
 ## Permissions
 
 | Permission | Why | Where |
@@ -93,6 +103,35 @@ swift Scripts/debug-command.swift show "type:json" snapshot:/tmp/shelf.png state
 
 ```bash
 open -n build/Build/Products/Debug/ClipShelf.app --args -ClipShelfSupportDirectory /tmp/clipshelf-test
+```
+
+## Releases and CI
+
+- **CI** (`.github/workflows/ci.yml`) builds and tests every pull request and every push to `main` on a macOS 26 runner with Xcode 26.6, then uploads the Debug build as a zipped artifact. Its check is called `Build and test`, which is the required status check for `main`, so keep the job name stable.
+- **Release** (`.github/workflows/release.yml`) runs when a `v*` tag is pushed. It builds the Release configuration for Apple Silicon (`ARCHS=arm64`), takes `MARKETING_VERSION` from the tag and the build number from the workflow run number, and publishes `ClipShelf-<version>.dmg` and `ClipShelf-<version>.zip` to a GitHub Release with generated notes. A tag with a suffix such as `v0.3.0-beta.1` becomes a prerelease with version 0.3.0.
+
+To cut a release, merge everything into `main`, wait for CI to pass, then tag the commit and push the tag:
+
+```bash
+git switch main && git pull
+```
+
+```bash
+git tag -a v0.2.0 -m "ClipShelf 0.2.0"
+```
+
+```bash
+git push origin v0.2.0
+```
+
+To check the packaging locally before tagging:
+
+```bash
+xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -configuration Release -derivedDataPath build ARCHS=arm64 ONLY_ACTIVE_ARCH=NO MARKETING_VERSION=0.2.0 CURRENT_PROJECT_VERSION=1 build
+```
+
+```bash
+Scripts/package-release.sh build/Build/Products/Release/ClipShelf.app 0.2.0 dist
 ```
 
 ## License

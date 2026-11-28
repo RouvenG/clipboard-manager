@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+  APP_PATH: build/Build/Products/Release/ClipShelf.app
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read version from tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          marketing="${version%%-*}"
+          if ! [[ "$marketing" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not a version like v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+          prerelease=false
+          if [ "$version" != "$marketing" ]; then prerelease=true; fi
+          {
+            echo "VERSION=$version"
+            echo "MARKETING_VERSION=$marketing"
+            echo "PRERELEASE=$prerelease"
+          } >> "$GITHUB_ENV"
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Build Release (Apple Silicon)
+        run: |
+          xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -configuration Release -derivedDataPath build \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            build
+          plist="$APP_PATH/Contents/Info.plist"
+          echo "Version $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$plist") ($(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$plist"))"
+          lipo -archs "$APP_PATH/Contents/MacOS/ClipShelf"
+
+      - name: Package zip and DMG
+        run: |
+          Scripts/package-release.sh "$APP_PATH" "$VERSION" dist
+          echo "DMG_PATH=dist/ClipShelf-$VERSION.dmg" >> "$GITHUB_ENV"
+          echo "ZIP_PATH=dist/ClipShelf-$VERSION.zip" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Apple Silicon only. This build is ad hoc signed, so Gatekeeper blocks the first launch: right-click ClipShelf.app, choose Open and confirm, or run \`xattr -dr com.apple.quarantine /Applications/ClipShelf.app\`."
+          gh release create "$GITHUB_REF_NAME" "$DMG_PATH" "$ZIP_PATH" \
+            --verify-tag --generate-notes --title "ClipShelf $VERSION" --notes "$notes" \
+            --prerelease="$PRERELEASE"
