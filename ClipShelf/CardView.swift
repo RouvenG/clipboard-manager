@@ -8,6 +8,9 @@ struct CardView: View {
     let isSelected: Bool
 
     static let size = CGSize(width: 230, height: 230)
+    static let cornerRadius: CGFloat = 12
+    static let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -18,10 +21,9 @@ struct CardView: View {
             footer
         }
         .frame(width: Self.size.width, height: Self.size.height)
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.85))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.85), in: Self.shape)
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            Self.shape
                 .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: isSelected ? 3 : 1)
         )
         .shadow(color: .black.opacity(isSelected ? 0.25 : 0.1), radius: isSelected ? 8 : 3, y: 2)
@@ -54,7 +56,10 @@ struct CardView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(kindColor.gradient)
+        // Shaped here instead of clipping the whole card: a card cut off by the edge of the scroll view
+        // got the clip's rounded corners on the header's bottom edge too.
+        .background(kindColor.gradient, in: UnevenRoundedRectangle(
+            topLeadingRadius: Self.cornerRadius, topTrailingRadius: Self.cornerRadius, style: .continuous))
     }
 
     @ViewBuilder
