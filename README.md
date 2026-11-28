@@ -37,7 +37,7 @@ xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -derivedDataPath build
 
 [Releases](https://github.com/RouvenG/clipboard-manager/releases) have a DMG and a zip for Apple Silicon Macs. Open the DMG and drag ClipShelf into Applications.
 
-Release builds are ad hoc signed unless the repository has Developer ID secrets (see [Releases and CI](#releases-and-ci)), so Gatekeeper blocks the first launch. Either right-click ClipShelf.app, choose Open and confirm, or clear the quarantine flag:
+Release builds are ad hoc signed (no Apple Developer ID or notarization), so Gatekeeper blocks the first launch. Either right-click ClipShelf.app, choose Open and confirm, or clear the quarantine flag:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/ClipShelf.app
@@ -133,20 +133,6 @@ xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -configuration Release
 ```bash
 Scripts/package-release.sh build/Build/Products/Release/ClipShelf.app 0.2.0 dist
 ```
-
-### Signing and notarization
-
-Builds are ad hoc signed by default. The release workflow switches to Developer ID signing with the hardened runtime, and notarizes and staples the app and the DMG, only when these repository secrets exist. None of them are required.
-
-| Secret | Used for |
-| --- | --- |
-| `MACOS_CERTIFICATE_P12` | Base64 of the exported Developer ID Application certificate and key (`base64 -i cert.p12`) |
-| `MACOS_CERTIFICATE_PASSWORD` | Password of that `.p12` |
-| `APPLE_TEAM_ID` | Team ID, used to pick the signing identity and for Apple ID notarization |
-| `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | Notarization with an App Store Connect API key (the `.p8` contents, raw or base64). Preferred. |
-| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | Notarization with an Apple ID and an app-specific password, if there's no API key |
-
-The first three enable signing. Signing plus one of the two credential sets enables notarization. Notarized releases open without the Gatekeeper workaround.
 
 ## License
 
