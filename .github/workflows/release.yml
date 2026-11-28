@@ -1,0 +1,175 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+  APP_PATH: build/Build/Products/Release/ClipShelf.app
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read version from tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          marketing="${version%%-*}"
+          if ! [[ "$marketing" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not a version like v1.2.3 or v1.2.3-beta.1"
+            exit 1
+          fi
+          prerelease=false
+          if [ "$version" != "$marketing" ]; then prerelease=true; fi
+          {
+            echo "VERSION=$version"
+            echo "MARKETING_VERSION=$marketing"
+            echo "PRERELEASE=$prerelease"
+          } >> "$GITHUB_ENV"
+
+      - name: Check for signing secrets
+        id: signing
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          sign=false
+          notarize=false
+          if [ -n "$MACOS_CERTIFICATE_P12" ] && [ -n "$MACOS_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            sign=true
+            if { [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_KEY_ID" ] && [ -n "$APPLE_API_ISSUER_ID" ]; } ||
+               { [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ]; }; then
+              notarize=true
+            fi
+          fi
+          echo "sign=$sign" >> "$GITHUB_OUTPUT"
+          echo "notarize=$notarize" >> "$GITHUB_OUTPUT"
+          echo "Developer ID signing: $sign, notarization: $notarize"
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Build Release (Apple Silicon)
+        run: |
+          xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -configuration Release -derivedDataPath build \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            build
+          plist="$APP_PATH/Contents/Info.plist"
+          echo "Version $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$plist") ($(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$plist"))"
+          lipo -archs "$APP_PATH/Contents/MacOS/ClipShelf"
+
+      - name: Import Developer ID certificate
+        if: steps.signing.outputs.sign == 'true'
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          keychains=("$keychain")
+          while IFS= read -r existing; do
+            keychains+=("$(printf '%s' "$existing" | sed -e 's/^[[:space:]]*"//' -e 's/"$//')")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${keychains[@]}"
+          identity="$(security find-identity -v -p codesigning "$keychain" | grep "Developer ID Application" | grep "($APPLE_TEAM_ID)" | head -n 1 | awk '{print $2}')"
+          if [ -z "$identity" ]; then
+            echo "::error::No Developer ID Application identity for the team in the certificate"
+            exit 1
+          fi
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Sign app with Developer ID
+        if: steps.signing.outputs.sign == 'true'
+        run: |
+          for nested in "$APP_PATH"/Contents/Frameworks/* "$APP_PATH"/Contents/PlugIns/*; do
+            [ -e "$nested" ] || continue
+            codesign --force --options runtime --timestamp --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$nested"
+          done
+          codesign --force --options runtime --timestamp --preserve-metadata=entitlements \
+            --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$APP_PATH"
+          codesign --verify --strict --verbose=2 "$APP_PATH"
+
+      - name: Notarize app
+        if: steps.signing.outputs.notarize == 'true'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$RUNNER_TEMP/ClipShelf-notarize.zip"
+          Scripts/notarize.sh "$RUNNER_TEMP/ClipShelf-notarize.zip" "$APP_PATH"
+
+      - name: Package zip and DMG
+        run: |
+          Scripts/package-release.sh "$APP_PATH" "$VERSION" dist
+          echo "DMG_PATH=dist/ClipShelf-$VERSION.dmg" >> "$GITHUB_ENV"
+          echo "ZIP_PATH=dist/ClipShelf-$VERSION.zip" >> "$GITHUB_ENV"
+
+      - name: Sign DMG
+        if: steps.signing.outputs.sign == 'true'
+        run: codesign --force --timestamp --keychain "$SIGNING_KEYCHAIN" --sign "$SIGNING_IDENTITY" "$DMG_PATH"
+
+      - name: Notarize DMG
+        if: steps.signing.outputs.notarize == 'true'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: Scripts/notarize.sh "$DMG_PATH"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ steps.signing.outputs.notarize }}
+        run: |
+          if [ "$SIGNED" = "true" ]; then
+            notes="Signed with Developer ID and notarized. Apple Silicon only."
+          else
+            notes="Apple Silicon only. This build is ad hoc signed, so Gatekeeper blocks the first launch: right-click ClipShelf.app, choose Open and confirm, or run \`xattr -dr com.apple.quarantine /Applications/ClipShelf.app\`."
+          fi
+          gh release create "$GITHUB_REF_NAME" "$DMG_PATH" "$ZIP_PATH" \
+            --verify-tag --generate-notes --title "ClipShelf $VERSION" --notes "$notes" \
+            --prerelease="$PRERELEASE"
+
+      - name: Remove signing keychain
+        if: always() && steps.signing.outputs.sign == 'true'
+        run: |
+          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+          fi

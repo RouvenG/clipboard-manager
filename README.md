@@ -33,6 +33,16 @@ ClipShelf runs as a menu bar app (clipboard icon, no Dock icon). Run the tests w
 xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -derivedDataPath build test
 ```
 
+### Download a release
+
+[Releases](https://github.com/RouvenG/clipboard-manager/releases) have a DMG and a zip for Apple Silicon Macs. Open the DMG and drag ClipShelf into Applications.
+
+Release builds are ad hoc signed unless the repository has Developer ID secrets (see [Releases and CI](#releases-and-ci)), so Gatekeeper blocks the first launch. Either right-click ClipShelf.app, choose Open and confirm, or clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/ClipShelf.app
+```
+
 ## Permissions
 
 | Permission | Why | Where |
@@ -94,6 +104,49 @@ swift Scripts/debug-command.swift show "type:json" snapshot:/tmp/shelf.png state
 ```bash
 open -n build/Build/Products/Debug/ClipShelf.app --args -ClipShelfSupportDirectory /tmp/clipshelf-test
 ```
+
+## Releases and CI
+
+- **CI** (`.github/workflows/ci.yml`) builds and tests every pull request and every push to `main` on a macOS 26 runner with Xcode 26.6, then uploads the Debug build as a zipped artifact. Its check is called `Build and test`, which is the required status check for `main`, so keep the job name stable.
+- **Release** (`.github/workflows/release.yml`) runs when a `v*` tag is pushed. It builds the Release configuration for Apple Silicon (`ARCHS=arm64`), takes `MARKETING_VERSION` from the tag and the build number from the workflow run number, and publishes `ClipShelf-<version>.dmg` and `ClipShelf-<version>.zip` to a GitHub Release with generated notes. A tag with a suffix such as `v0.3.0-beta.1` becomes a prerelease with version 0.3.0.
+
+To cut a release, merge everything into `main`, wait for CI to pass, then tag the commit and push the tag:
+
+```bash
+git switch main && git pull
+```
+
+```bash
+git tag -a v0.2.0 -m "ClipShelf 0.2.0"
+```
+
+```bash
+git push origin v0.2.0
+```
+
+To check the packaging locally before tagging:
+
+```bash
+xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -configuration Release -derivedDataPath build ARCHS=arm64 ONLY_ACTIVE_ARCH=NO MARKETING_VERSION=0.2.0 CURRENT_PROJECT_VERSION=1 build
+```
+
+```bash
+Scripts/package-release.sh build/Build/Products/Release/ClipShelf.app 0.2.0 dist
+```
+
+### Signing and notarization
+
+Builds are ad hoc signed by default. The release workflow switches to Developer ID signing with the hardened runtime, and notarizes and staples the app and the DMG, only when these repository secrets exist. None of them are required.
+
+| Secret | Used for |
+| --- | --- |
+| `MACOS_CERTIFICATE_P12` | Base64 of the exported Developer ID Application certificate and key (`base64 -i cert.p12`) |
+| `MACOS_CERTIFICATE_PASSWORD` | Password of that `.p12` |
+| `APPLE_TEAM_ID` | Team ID, used to pick the signing identity and for Apple ID notarization |
+| `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` | Notarization with an App Store Connect API key (the `.p8` contents, raw or base64). Preferred. |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | Notarization with an Apple ID and an app-specific password, if there's no API key |
+
+The first three enable signing. Signing plus one of the two credential sets enables notarization. Notarized releases open without the Gatekeeper workaround.
 
 ## License
 
