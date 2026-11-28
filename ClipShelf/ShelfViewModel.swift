@@ -117,10 +117,7 @@ final class ShelfViewModel {
         case .pinboard(let id):
             base = (boards.first { $0.id == id }?.items ?? []).sorted { $0.lastUsedAt > $1.lastUsedAt }
         }
-        let tokens = query.lowercased().split(separator: " ").map(String.init)
-        return base.filter { item in
-            filter.matches(item) && tokens.allSatisfy { searchText(of: item).contains($0) }
-        }
+        return SearchQuery(query).rank(base.filter(filter.matches))
     }
 
     var selectedItem: ClipItem? {
@@ -135,13 +132,6 @@ final class ShelfViewModel {
         case .history: "History"
         case .pinboard(let id): boards.first { $0.id == id }?.name ?? "Pinboard"
         }
-    }
-
-    private func searchText(of item: ClipItem) -> String {
-        [item.text, item.sourceAppName, item.codeLanguage, item.kind.rawValue]
-            .compactMap { $0 }
-            .joined(separator: " ")
-            .lowercased()
     }
 
     private func clampSelection() {
@@ -171,7 +161,7 @@ final class ShelfViewModel {
 
     var placeholder: String {
         switch mode {
-        case .browse: "Type to search"
+        case .browse: "Search, or name: app: is: lang: board:"
         case .transforms: "Filter transforms"
         case .pinboardPicker: "Pinboard name (Return creates it if new)"
         case .editing: "Editing"

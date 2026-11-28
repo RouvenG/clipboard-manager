@@ -517,3 +517,87 @@ struct EditTests {
                          isARepeat: false, keyCode: UInt16(code))!
     }
 }
+
+struct SearchTests {
+    private struct Fixture {
+        let store = HistoryStore(inMemory: true)
+        let deploy: ClipItem
+        let invoice: ClipItem
+        let swift: ClipItem
+        let link: ClipItem
+
+        init() {
+            deploy = store.record(ClipSnapshot(kind: .text, text: "kubectl rollout restart deployment/api"),
+                                  sourceBundleID: "com.googlecode.iterm2", sourceAppName: "iTerm2")
+            store.setName(of: deploy, to: "Deploy notes")
+            invoice = store.record(ClipSnapshot(kind: .text, text: "Rechnung für März, bitte bis Freitag zahlen"),
+                                   sourceBundleID: "com.apple.mail", sourceAppName: "Mail")
+            swift = store.record(ClipSnapshot(kind: .text, text: "func deploy() async throws { }", codeLanguage: "swift"),
+                                 sourceBundleID: "com.apple.dt.Xcode", sourceAppName: "Xcode")
+            link = store.record(ClipSnapshot(kind: .link, text: "https://example.com/deploy-guide"),
+                                sourceBundleID: "com.apple.Safari", sourceAppName: "Safari")
+            let work = store.createPinboard(named: "Work")
+            store.toggle(link, in: work)
+        }
+
+        var all: [ClipItem] { store.items() }
+
+        func search(_ query: String) -> [ClipItem] { SearchQuery(query).rank(all) }
+    }
+
+    @Test func parsesPhrasesFieldsAndNegation() {
+        let query = SearchQuery(#"name:"deploy notes" -draft app:Slack "two words" is:code"#)
+        #expect(query.terms == [
+            .init(text: "deploy notes", field: .name),
+            .init(text: "draft", negated: true),
+            .init(text: "Slack", field: .app),
+            .init(text: "two words"),
+            .init(text: "code", field: .type),
+        ])
+        #expect(SearchQuery("   ").isEmpty)
+        #expect(SearchQuery("http://x").terms == [.init(text: "http://x")], "unknown prefixes stay plain text")
+    }
+
+    @Test func namesRankFirst() {
+        let f = Fixture()
+        let results = f.search("deploy")
+        #expect(results.first?.id == f.deploy.id)
+        #expect(Set(results.map(\.id)) == Set([f.deploy.id, f.swift.id, f.link.id]))
+    }
+
+    @Test func fuzzyMatchesNamesOnly() {
+        let f = Fixture()
+        #expect(f.search("dpn").map(\.id) == [f.deploy.id])
+    }
+
+    @Test func ignoresCaseAndAccents() {
+        let f = Fixture()
+        #expect(f.search("MARZ").map(\.id) == [f.invoice.id])
+        #expect(f.search("fur marz").map(\.id) == [f.invoice.id])
+    }
+
+    @Test func fieldFiltersAndExclusions() {
+        let f = Fixture()
+        #expect(f.search("deploy -kubectl").map(\.id).contains(f.deploy.id) == false)
+        #expect(f.search("app:xcode").map(\.id) == [f.swift.id])
+        #expect(f.search("is:code").map(\.id) == [f.swift.id])
+        #expect(f.search("lang:swift deploy").map(\.id) == [f.swift.id])
+        #expect(f.search("is:link").map(\.id) == [f.link.id])
+        #expect(f.search("is:named").map(\.id) == [f.deploy.id])
+        #expect(f.search("board:work").map(\.id) == [f.link.id])
+        #expect(f.search("is:pinned deploy").map(\.id) == [f.link.id])
+        #expect(f.search(#""rollout restart""#).map(\.id) == [f.deploy.id])
+        #expect(f.search(#""restart rollout""#).isEmpty)
+        #expect(f.search("name:kubectl").isEmpty, "name: only looks at names")
+    }
+
+    @Test func shelfUsesRankedSearch() {
+        let f = Fixture()
+        let model = ShelfViewModel(store: f.store)
+        model.reload()
+        model.query = "deploy"
+        #expect(model.visibleItems.first?.id == f.deploy.id)
+        model.filter = .code
+        #expect(model.visibleItems.map(\.id) == [f.swift.id])
+    }
+}
