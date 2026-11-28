@@ -65,6 +65,8 @@ Launch at login is a toggle in Settings > General (uses `SMAppService`; works be
 | ⇧Return | Paste as plain text |
 | ⌘1 to ⌘9 | Paste card 1 to 9 directly (add ⇧ for plain text) |
 | ⌘K | Transform the selected card, then paste the result |
+| ⌘O | Edit the selected text or link card (also Edit… in the card's right-click menu). ⌘↩ or ⌘S saves, Esc cancels. Changing rich text saves it as plain text. |
+| ⌘R | Name the selected card (also Rename… in the right-click menu). Any card can have a name, including images and files. |
 | ⌘P | Add to or remove from a pinboard (type a new name and Return to create one) |
 | Drag a card onto a tab | Move it to that pinboard (hold ⌥ to keep it in the current one too). Dropping on History takes it off its pinboard. Cards also drag out into other apps. |
 | Tab / ⇧Tab | Switch between History and pinboards |
@@ -72,6 +74,20 @@ Launch at login is a toggle in Settings > General (uses `SMAppService`; works be
 | ⌘C | Copy the card without pasting |
 | ⌘⌫ | Delete the card |
 | Esc | Clear search, then filter, then close |
+
+### Search
+
+Typing searches card names, text, source app, language and type, ignoring case and accents. Every word must match, and named cards matching by name come first. Names also match loosely: `dpn` finds "Deploy notes".
+
+| Syntax | Finds |
+| --- | --- |
+| `"exact phrase"` | The words together, in that order |
+| `-word` | Cards that don't match the word |
+| `name:deploy` | Only cards whose name matches |
+| `app:slack` | Cards copied from that app |
+| `is:code` | One type: `text`, `rich`, `link`, `image`, `file`, `code`, `named`, `pinned` |
+| `lang:swift` | Code in that language |
+| `board:work` | Cards in a pinboard whose name matches |
 
 History older than the retention window (default 30 days, configurable, or forever) is pruned hourly. Items in pinboards never expire.
 

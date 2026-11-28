@@ -28,6 +28,8 @@ final class DebugHooks {
         case "show": shelf.show()
         case "hide": shelf.hide()
         case "type": model.activeQuery += argument
+        case "draft": model.draft = argument
+        case "name": model.draftName = argument
         case "key": sendKey(argument)
         case "snapshot": snapshot(to: argument)
         case "drop": drop(argument)
@@ -93,6 +95,8 @@ final class DebugHooks {
             "menu": model.mode == .transforms ? model.visibleTransforms.map(\.name) : model.visibleBoards.map(\.name),
             "menuIndex": model.menuIndex,
             "status": model.status ?? "",
+            "draft": model.draft,
+            "names": model.visibleItems.prefix(12).map { $0.title ?? "" },
             "pasteboard": NSPasteboard.general.string(forType: .string) ?? "",
             "accessibility": AccessibilityPermission.isGranted,
             "pasteboardAccess": PasteboardAccess.description,

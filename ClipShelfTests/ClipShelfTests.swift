@@ -386,3 +386,218 @@ struct ShortcutTests {
         #expect(other.register(first))
     }
 }
+
+struct EditTests {
+    private func record(_ store: HistoryStore, _ snapshot: ClipSnapshot) -> ClipItem {
+        store.record(snapshot, sourceBundleID: nil, sourceAppName: nil)
+    }
+
+    @Test func updatesTextAndHash() {
+        let store = HistoryStore(inMemory: true)
+        let item = record(store, ClipSnapshot(kind: .text, text: "helo world"))
+        #expect(store.updateText(of: item, to: "hello world") == .saved)
+        #expect(item.text == "hello world")
+        #expect(item.contentHash == ClipSnapshot(kind: .text, text: "hello world").contentHash)
+        #expect(store.item(withHash: item.contentHash)?.id == item.id)
+    }
+
+    @Test func redetectsKindAndCode() {
+        let store = HistoryStore(inMemory: true)
+        let item = record(store, ClipSnapshot(kind: .richText, text: "notes", rtfData: Data("{\\rtf1 notes}".utf8)))
+        #expect(store.updateText(of: item, to: #"{"name": "clipshelf", "tags": [1, 2]}"#) == .saved)
+        #expect(item.kind == .text)
+        #expect(item.rtfData == nil)
+        #expect(item.codeLanguage == "json")
+
+        #expect(store.updateText(of: item, to: "https://example.com/docs") == .saved)
+        #expect(item.kind == .link)
+        #expect(item.codeLanguage == nil)
+    }
+
+    @Test func rejectsEmptyUnchangedAndNonText() {
+        let store = HistoryStore(inMemory: true)
+        let item = record(store, ClipSnapshot(kind: .text, text: "keep"))
+        #expect(store.updateText(of: item, to: "  \n") == .empty)
+        #expect(store.updateText(of: item, to: "keep") == .unchanged)
+        #expect(item.text == "keep")
+        let image = record(store, ClipSnapshot(kind: .image, imageData: Data([1, 2, 3])))
+        #expect(store.updateText(of: image, to: "text") == .notText)
+    }
+
+    @Test func mergesIntoExistingDuplicate() {
+        let store = HistoryStore(inMemory: true)
+        let edited = record(store, ClipSnapshot(kind: .text, text: "draft"))
+        let duplicate = record(store, ClipSnapshot(kind: .text, text: "final"))
+        let board = store.createPinboard(named: "Work")
+        store.toggle(duplicate, in: board)
+
+        #expect(store.updateText(of: edited, to: "final") == .saved)
+        #expect(store.items().map(\.id) == [edited.id])
+        #expect(board.items.map(\.id) == [edited.id])
+    }
+
+    @Test func modelEditFlowWithShortcuts() {
+        let store = HistoryStore(inMemory: true)
+        let item = record(store, ClipSnapshot(kind: .text, text: "before"))
+        let model = ShelfViewModel(store: store)
+        model.reload()
+
+        #expect(model.handleKey(Self.key(kVK_ANSI_O, "o", [.command])))
+        #expect(model.mode == .editing)
+        #expect(model.draft == "before")
+        #expect(!model.handleKey(Self.key(kVK_ANSI_A, "a", [])), "plain typing must reach the editor")
+        #expect(!model.handleKey(Self.key(kVK_Return, "\r", [])), "Return must insert a newline")
+
+        model.draft = "after"
+        #expect(model.handleKey(Self.key(kVK_Escape, "\u{1b}", [])))
+        #expect(model.mode == .browse)
+        #expect(item.text == "before")
+
+        model.startEditing(item)
+        model.draft = "after"
+        #expect(model.handleKey(Self.key(kVK_Return, "\r", [.command])))
+        #expect(model.mode == .browse)
+        #expect(item.text == "after")
+        #expect(model.status == "Saved")
+    }
+
+    @Test func imagesCanOnlyBeNamed() {
+        let store = HistoryStore(inMemory: true)
+        let image = record(store, ClipSnapshot(kind: .image, imageData: Data([1, 2, 3])))
+        let model = ShelfViewModel(store: store)
+        model.reload()
+        model.startEditing(image)
+        #expect(model.mode == .editing)
+        #expect(model.editFocus == .name)
+        model.draftName = "  Logo draft "
+        model.saveEditing()
+        #expect(image.title == "Logo draft")
+        #expect(image.imageData == Data([1, 2, 3]))
+        #expect(model.status == "Named \"Logo draft\"")
+    }
+
+    @Test func renamingKeepsRichTextFormatting() {
+        let store = HistoryStore(inMemory: true)
+        let rtf = Data("{\\rtf1 notes}".utf8)
+        let item = record(store, ClipSnapshot(kind: .richText, text: "notes", rtfData: rtf))
+        let model = ShelfViewModel(store: store)
+        model.reload()
+        model.startEditing(item, focus: .name)
+        model.draftName = "Meeting"
+        model.saveEditing()
+        #expect(item.kind == .richText)
+        #expect(item.rtfData == rtf)
+        #expect(item.title == "Meeting")
+    }
+
+    @Test func renameShortcutAndClearingName() {
+        let store = HistoryStore(inMemory: true)
+        let item = record(store, ClipSnapshot(kind: .text, text: "ssh deploy@host"))
+        let model = ShelfViewModel(store: store)
+        model.reload()
+
+        #expect(model.handleKey(Self.key(kVK_ANSI_R, "r", [.command])))
+        #expect(model.editFocus == .name)
+        model.draftName = "Deploy login"
+        model.saveEditing()
+        #expect(item.title == "Deploy login")
+        #expect(item.text == "ssh deploy@host")
+
+        model.startEditing(item, focus: .name)
+        #expect(model.draftName == "Deploy login")
+        model.draftName = ""
+        model.saveEditing()
+        #expect(item.title == nil)
+        #expect(model.status == "Name removed")
+    }
+
+    private static func key(_ code: Int, _ characters: String, _ flags: NSEvent.ModifierFlags) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                         context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                         isARepeat: false, keyCode: UInt16(code))!
+    }
+}
+
+struct SearchTests {
+    private struct Fixture {
+        let store = HistoryStore(inMemory: true)
+        let deploy: ClipItem
+        let invoice: ClipItem
+        let swift: ClipItem
+        let link: ClipItem
+
+        init() {
+            deploy = store.record(ClipSnapshot(kind: .text, text: "kubectl rollout restart deployment/api"),
+                                  sourceBundleID: "com.googlecode.iterm2", sourceAppName: "iTerm2")
+            store.setName(of: deploy, to: "Deploy notes")
+            invoice = store.record(ClipSnapshot(kind: .text, text: "Rechnung für März, bitte bis Freitag zahlen"),
+                                   sourceBundleID: "com.apple.mail", sourceAppName: "Mail")
+            swift = store.record(ClipSnapshot(kind: .text, text: "func deploy() async throws { }", codeLanguage: "swift"),
+                                 sourceBundleID: "com.apple.dt.Xcode", sourceAppName: "Xcode")
+            link = store.record(ClipSnapshot(kind: .link, text: "https://example.com/deploy-guide"),
+                                sourceBundleID: "com.apple.Safari", sourceAppName: "Safari")
+            let work = store.createPinboard(named: "Work")
+            store.toggle(link, in: work)
+        }
+
+        var all: [ClipItem] { store.items() }
+
+        func search(_ query: String) -> [ClipItem] { SearchQuery(query).rank(all) }
+    }
+
+    @Test func parsesPhrasesFieldsAndNegation() {
+        let query = SearchQuery(#"name:"deploy notes" -draft app:Slack "two words" is:code"#)
+        #expect(query.terms == [
+            .init(text: "deploy notes", field: .name),
+            .init(text: "draft", negated: true),
+            .init(text: "Slack", field: .app),
+            .init(text: "two words"),
+            .init(text: "code", field: .type),
+        ])
+        #expect(SearchQuery("   ").isEmpty)
+        #expect(SearchQuery("http://x").terms == [.init(text: "http://x")], "unknown prefixes stay plain text")
+    }
+
+    @Test func namesRankFirst() {
+        let f = Fixture()
+        let results = f.search("deploy")
+        #expect(results.first?.id == f.deploy.id)
+        #expect(Set(results.map(\.id)) == Set([f.deploy.id, f.swift.id, f.link.id]))
+    }
+
+    @Test func fuzzyMatchesNamesOnly() {
+        let f = Fixture()
+        #expect(f.search("dpn").map(\.id) == [f.deploy.id])
+    }
+
+    @Test func ignoresCaseAndAccents() {
+        let f = Fixture()
+        #expect(f.search("MARZ").map(\.id) == [f.invoice.id])
+        #expect(f.search("fur marz").map(\.id) == [f.invoice.id])
+    }
+
+    @Test func fieldFiltersAndExclusions() {
+        let f = Fixture()
+        #expect(f.search("deploy -kubectl").map(\.id).contains(f.deploy.id) == false)
+        #expect(f.search("app:xcode").map(\.id) == [f.swift.id])
+        #expect(f.search("is:code").map(\.id) == [f.swift.id])
+        #expect(f.search("lang:swift deploy").map(\.id) == [f.swift.id])
+        #expect(f.search("is:link").map(\.id) == [f.link.id])
+        #expect(f.search("is:named").map(\.id) == [f.deploy.id])
+        #expect(f.search("board:work").map(\.id) == [f.link.id])
+        #expect(f.search("is:pinned deploy").map(\.id) == [f.link.id])
+        #expect(f.search(#""rollout restart""#).map(\.id) == [f.deploy.id])
+        #expect(f.search(#""restart rollout""#).isEmpty)
+        #expect(f.search("name:kubectl").isEmpty, "name: only looks at names")
+    }
+
+    @Test func shelfUsesRankedSearch() {
+        let f = Fixture()
+        let model = ShelfViewModel(store: f.store)
+        model.reload()
+        model.query = "deploy"
+        #expect(model.visibleItems.first?.id == f.deploy.id)
+        model.filter = .code
+        #expect(model.visibleItems.map(\.id) == [f.swift.id])
+    }
+}

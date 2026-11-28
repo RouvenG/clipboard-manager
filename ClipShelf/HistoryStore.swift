@@ -49,6 +49,52 @@ final class HistoryStore {
         return item
     }
 
+    /// Sets or clears (empty) a clip's name. Returns whether it changed.
+    @discardableResult
+    func setName(of item: ClipItem, to name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newValue: String? = trimmed.isEmpty ? nil : trimmed
+        guard newValue != item.title else { return false }
+        item.title = newValue
+        save()
+        return true
+    }
+
+    enum EditResult: Equatable { case saved, unchanged, empty, notText }
+
+    /// Replaces a text, rich text or link clip's text. Rich text becomes plain text, and the kind and code
+    /// language are detected again. If the new text matches another clip, that clip is merged into this one.
+    @discardableResult
+    func updateText(of item: ClipItem, to newText: String) -> EditResult {
+        guard item.kind == .text || item.kind == .richText || item.kind == .link else { return .notText }
+        guard !newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .empty }
+        guard newText != item.text else { return .unchanged }
+
+        let snapshot: ClipSnapshot
+        if let link = LinkDetector.link(in: newText) {
+            snapshot = ClipSnapshot(kind: .link, text: link)
+        } else {
+            snapshot = ClipSnapshot(kind: .text, text: newText, codeLanguage: CodeDetector.language(of: newText))
+        }
+        let hash = snapshot.contentHash
+        if let duplicate = self.item(withHash: hash), duplicate.id != item.id {
+            if item.title == nil { item.title = duplicate.title }
+            for board in duplicate.pinboards where !board.items.contains(where: { $0.id == item.id }) {
+                board.items.append(item)
+            }
+            context.delete(duplicate)
+        }
+
+        item.kindRaw = snapshot.kind.rawValue
+        item.text = snapshot.text
+        item.rtfData = nil
+        item.htmlData = nil
+        item.codeLanguage = snapshot.codeLanguage
+        item.contentHash = hash
+        save()
+        return .saved
+    }
+
     func items(limit: Int = 5000) -> [ClipItem] {
         var descriptor = FetchDescriptor<ClipItem>(sortBy: [SortDescriptor(\.lastUsedAt, order: .reverse)])
         descriptor.fetchLimit = limit
