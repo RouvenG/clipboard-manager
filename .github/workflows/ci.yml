@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  # Branch protection on main requires the check "Build and test". Keep this job name stable.
+  build-and-test:
+    name: Build and test
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Build
+        run: xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -derivedDataPath build build
+
+      - name: Test
+        run: xcodebuild -project ClipShelf.xcodeproj -scheme ClipShelf -derivedDataPath build -resultBundlePath build/TestResults.xcresult test
+
+      - name: Zip app
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          ditto -c -k --sequesterRsrc --keepParent build/Build/Products/Debug/ClipShelf.app "build/ClipShelf-debug-$short_sha.zip"
+          echo "APP_ZIP=build/ClipShelf-debug-$short_sha.zip" >> "$GITHUB_ENV"
+
+      - name: Upload app
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.APP_ZIP }}
+          archive: false
+          retention-days: 14
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: TestResults
+          path: build/TestResults.xcresult
+          retention-days: 7
