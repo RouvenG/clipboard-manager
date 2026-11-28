@@ -11,7 +11,9 @@ struct ShelfView: View {
             header
             ZStack(alignment: .top) {
                 cards
-                if model.mode != .browse {
+                if model.mode == .editing {
+                    EditOverlay(model: model)
+                } else if model.mode != .browse {
                     MenuOverlay(model: model)
                 }
             }
@@ -24,7 +26,7 @@ struct ShelfView: View {
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.12)))
         .onAppear { searchFocused = true }
         .onChange(of: model.store.revision) { model.reload() }
-        .onChange(of: model.mode) { searchFocused = true }
+        .onChange(of: model.mode) { searchFocused = model.mode != .editing }
     }
 
     private var header: some View {
@@ -41,6 +43,7 @@ struct ShelfView: View {
                 TextField(model.placeholder, text: $model.activeQuery)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
+                    .disabled(model.mode == .editing)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -67,7 +70,7 @@ struct ShelfView: View {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         CardView(item: item, index: index, isSelected: index == model.selectedIndex)
                             .id(item.id)
-                            .onTapGesture(count: 2) { model.onPaste(item, false) }
+                            .onTapGesture(count: 2) { if model.mode == .browse { model.onPaste(item, false) } }
                             .onTapGesture { model.selectedIndex = index }
                             .onDrag {
                                 model.selectedIndex = index
@@ -97,6 +100,10 @@ struct ShelfView: View {
         Button("Paste as Plain Text") { model.onPaste(item, true) }
         Button("Copy") { model.onCopy(item) }
         Divider()
+        if ShelfViewModel.canEditText(item) {
+            Button("Edit…") { model.startEditing(item) }
+        }
+        Button("Rename…") { model.startEditing(item, focus: .name) }
         Button("Transform…") { model.selectedIndex = index; model.openTransforms() }
         Button("Pinboards…") { model.selectedIndex = index; model.openPinboardPicker() }
         Divider()
@@ -123,6 +130,8 @@ struct ShelfView: View {
                 Text("⇧↩ plain")
                 Text("⌘1-9 quick")
                 Text("⌘K transform")
+                Text("⌘O edit")
+                Text("⌘R name")
                 Text("⌘P pin")
                 Text("drag to board, ⌥ copies")
                 Text("⇥ boards")
@@ -192,6 +201,78 @@ private struct TabButtonStyle: ButtonStyle {
             .foregroundStyle(isSelected ? .primary : .secondary)
             .opacity(configuration.isPressed ? 0.7 : 1)
             .contentShape(Capsule())
+    }
+}
+
+/// Edits the selected clip's text in place. ⌘↩ or ⌘S saves, Esc cancels.
+private struct EditOverlay: View {
+    @Bindable var model: ShelfViewModel
+    @FocusState private var focus: ShelfViewModel.EditFocus?
+
+    var body: some View {
+        let item = model.editingItem
+        let editsText = item.map(ShelfViewModel.canEditText) ?? false
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "pencil")
+                Text("Edit \(item.map(Self.kindTitle) ?? "clip")")
+                    .font(.headline)
+                if item?.kind == .richText {
+                    Text("Changing the text drops its formatting").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { model.cancelEditing() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { model.saveEditing() }
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .buttonStyle(.borderedProminent)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "tag").foregroundStyle(.secondary)
+                TextField("Name (optional, found first when you search)", text: $model.draftName)
+                    .textFieldStyle(.plain)
+                    .focused($focus, equals: .name)
+                    .onSubmit { model.saveEditing() }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+            if editsText {
+                TextEditor(text: $model.draft)
+                    .font(item?.isCode == true ? .system(.body, design: .monospaced) : .body)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .background(.background.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                    .focused($focus, equals: .text)
+            } else {
+                Text("Images and files can be named, their content stays as copied.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            HStack {
+                if editsText { Text("\(model.draft.count) characters") }
+                Spacer()
+                Text("⌘↩ save · esc cancel")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: 760)
+        .frame(maxHeight: .infinity)
+        .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .shadow(radius: 12)
+        .onAppear { focus = model.editFocus }
+    }
+
+    private static func kindTitle(_ item: ClipItem) -> String {
+        if let language = item.codeLanguage { return CodeDetector.displayName(of: language) }
+        switch item.kind {
+        case .text, .richText: return "text"
+        case .link: return "link"
+        case .image: return "image"
+        case .file: return "file"
+        }
     }
 }
 

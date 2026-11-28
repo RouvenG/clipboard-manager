@@ -55,6 +55,8 @@ Launch at login is a toggle in Settings > General (uses `SMAppService`; works be
 | ⇧Return | Paste as plain text |
 | ⌘1 to ⌘9 | Paste card 1 to 9 directly (add ⇧ for plain text) |
 | ⌘K | Transform the selected card, then paste the result |
+| ⌘O | Edit the selected text or link card (also Edit… in the card's right-click menu). ⌘↩ or ⌘S saves, Esc cancels. Changing rich text saves it as plain text. |
+| ⌘R | Name the selected card (also Rename… in the right-click menu). Any card can have a name, including images and files. |
 | ⌘P | Add to or remove from a pinboard (type a new name and Return to create one) |
 | Drag a card onto a tab | Move it to that pinboard (hold ⌥ to keep it in the current one too). Dropping on History takes it off its pinboard. Cards also drag out into other apps. |
 | Tab / ⇧Tab | Switch between History and pinboards |

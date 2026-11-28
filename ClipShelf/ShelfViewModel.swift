@@ -50,6 +50,7 @@ enum ShelfMode: Equatable {
     case browse
     case transforms
     case pinboardPicker
+    case editing
 }
 
 @Observable
@@ -99,6 +100,9 @@ final class ShelfViewModel {
         filter = .all
         query = ""
         draggedItemID = nil
+        editingItemID = nil
+        draft = ""
+        draftName = ""
         menuQuery = ""
         status = nil
         selectedIndex = 0
@@ -170,6 +174,7 @@ final class ShelfViewModel {
         case .browse: "Type to search"
         case .transforms: "Filter transforms"
         case .pinboardPicker: "Pinboard name (Return creates it if new)"
+        case .editing: "Editing"
         }
     }
 
@@ -232,6 +237,60 @@ final class ShelfViewModel {
         reload()
     }
 
+    // MARK: Editing
+
+    enum EditFocus: Hashable { case name, text }
+
+    private(set) var editingItemID: UUID?
+    private(set) var editFocus: EditFocus = .text
+    var draft = ""
+    var draftName = ""
+
+    var editingItem: ClipItem? { editingItemID.flatMap { id in allItems.first { $0.id == id } } }
+
+    /// Every clip can be named; only text and links have editable content.
+    static func canEditText(_ item: ClipItem) -> Bool {
+        item.kind == .text || item.kind == .richText || item.kind == .link
+    }
+
+    /// ⌘O starts in the text, ⌘R (rename) in the name field. Images and files only have a name.
+    func startEditing(_ item: ClipItem? = nil, focus: EditFocus = .text) {
+        guard let item = item ?? selectedItem else { return }
+        if let index = visibleItems.firstIndex(where: { $0.id == item.id }) { selectedIndex = index }
+        editingItemID = item.id
+        editFocus = Self.canEditText(item) ? focus : .name
+        draft = item.text ?? ""
+        draftName = item.title ?? ""
+        status = nil
+        mode = .editing
+    }
+
+    func cancelEditing() {
+        editingItemID = nil
+        draft = ""
+        draftName = ""
+        mode = .browse
+    }
+
+    func saveEditing() {
+        guard let item = editingItem else { return cancelEditing() }
+        let textResult = Self.canEditText(item) ? store.updateText(of: item, to: draft) : .unchanged
+        if textResult == .empty {
+            status = "A clip can't be empty. Delete it with ⌘⌫ instead."
+            return
+        }
+        let renamed = store.setName(of: item, to: draftName)
+        if textResult == .saved {
+            status = item.kind == .link ? "Saved as link" : "Saved"
+        } else {
+            status = renamed ? (item.title.map { "Named \"\($0)\"" } ?? "Name removed") : "No changes"
+        }
+        let id = item.id
+        cancelEditing()
+        reload()
+        if let index = visibleItems.firstIndex(where: { $0.id == id }) { selectedIndex = index }
+    }
+
     // MARK: Drag and drop
 
     /// The card being dragged inside the shelf. Set when a drag starts, cleared on drop or when the shelf hides.
@@ -275,7 +334,33 @@ final class ShelfViewModel {
         switch mode {
         case .browse: return handleBrowseKey(key: key, command: command, shift: shift, characters: event.charactersIgnoringModifiers)
         case .transforms, .pinboardPicker: return handleMenuKey(key: key, shift: shift)
+        case .editing: return handleEditKey(key: key, command: command, shift: shift, characters: event.charactersIgnoringModifiers)
         }
+    }
+
+    /// Everything not handled here goes to the text editor. The menu bar app has no Edit menu, so the
+    /// standard editing shortcuts are routed to the editor by hand.
+    private func handleEditKey(key: Int, command: Bool, shift: Bool, characters: String?) -> Bool {
+        if key == kVK_Escape {
+            cancelEditing()
+            return true
+        }
+        guard command else { return false }
+        if key == kVK_Return || key == kVK_ANSI_KeypadEnter {
+            saveEditing()
+            return true
+        }
+        let action: String
+        switch characters?.lowercased() {
+        case "s": saveEditing(); return true
+        case "x": action = "cut:"
+        case "c": action = "copy:"
+        case "v": action = "paste:"
+        case "a": action = "selectAll:"
+        case "z": action = shift ? "redo:" : "undo:"
+        default: return false
+        }
+        return NSApp.sendAction(Selector(action), to: nil, from: nil)
     }
 
     private func handleBrowseKey(key: Int, command: Bool, shift: Bool, characters: String?) -> Bool {
@@ -319,6 +404,8 @@ final class ShelfViewModel {
 
         switch characters {
         case "k": openTransforms()
+        case "o": startEditing()
+        case "r": startEditing(focus: .name)
         case "p": openPinboardPicker()
         case "c": if let item = selectedItem { onCopy(item) }
         case ",": onOpenSettings()

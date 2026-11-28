@@ -32,10 +32,18 @@ struct CardView: View {
     private var header: some View {
         HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(kindTitle).font(.subheadline.weight(.semibold))
-                Text(item.lastUsedAt, format: .relative(presentation: .named))
-                    .font(.caption2)
-                    .opacity(0.85)
+                if let title = item.title {
+                    Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    (Text(kindTitle + " · ") + Text(item.lastUsedAt, format: .relative(presentation: .named)))
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .opacity(0.85)
+                } else {
+                    Text(kindTitle).font(.subheadline.weight(.semibold))
+                    Text(item.lastUsedAt, format: .relative(presentation: .named))
+                        .font(.caption2)
+                        .opacity(0.85)
+                }
             }
             Spacer(minLength: 0)
             if let icon = AppIconCache.icon(for: item.sourceBundleID) {

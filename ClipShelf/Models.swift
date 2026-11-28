@@ -17,6 +17,9 @@ final class ClipItem {
     var kindRaw: String = ClipKind.text.rawValue
     var contentHash: String = ""
 
+    /// Optional name the user gives the clip. Searched first.
+    var title: String?
+
     /// Plain text representation. Set for text, rich text, links and files (paths).
     var text: String?
     var rtfData: Data?
